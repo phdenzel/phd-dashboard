@@ -147,10 +147,14 @@ preserved."
   (expand-file-name (concat dashboard-banners-directory "logo.png"))
   "Emacs banner image.")
 
+(defconst dashboard-banner-phdemacs-png
+  (expand-file-name (concat dashboard-banners-directory "phdemacs.png"))
+  "PhD Emacs banner image.")
+
 (defconst dashboard-banner-length 75
   "Width of a banner.")
 
-(defcustom dashboard-banner-logo-title "Welcome to Emacs!"
+(defcustom dashboard-banner-logo-title "PhD Emacs - Dashboard"
   "Specify the startup banner."
   :type 'string
   :group 'dashboard)
@@ -197,7 +201,7 @@ Example:
   :type 'string
   :group 'dashboard)
 
-(defcustom dashboard-startup-banner 'official
+(defcustom dashboard-startup-banner 'phdemacs
   "Specify the startup banner.
 Default value is `official', it displays the Emacs logo.  `logo' displays Emacs
 alternative logo.  An integer value is the index of text banner.  A string
@@ -205,6 +209,7 @@ value must be a path to a .PNG or .TXT file.  If the value is nil then no banner
 is displayed."
   :type '(choice (const  :tag "offical"   official)
                  (const  :tag "logo"      logo)
+                 (const  :tag "phdemacs"  phdemacs)
                  (string :tag "a png or txt path"))
   :group 'dashboard)
 
@@ -218,11 +223,12 @@ is displayed."
     (bookmarks . dashboard-insert-bookmarks)
     (projects  . dashboard-insert-projects)
     (agenda    . dashboard-insert-agenda)
-    (registers . dashboard-insert-registers))
+    (registers . dashboard-insert-registers)
+    (modes     . dashboard-insert-modes))
   "Association list of items to how to generate in the startup buffer.
 Will be of the form `(list-type . list-function)'.
 Possible values for list-type are: `recents', `bookmarks', `projects',
-`agenda' ,`registers'."
+`agenda' ,`registers', `modes'."
   :type  '(repeat (alist :key-type symbol :value-type function))
   :group 'dashboard)
 
@@ -246,7 +252,7 @@ installed."
   "Association list of items to show in the startup buffer.
 Will be of the form `(list-type . list-size)'.
 If nil it is disabled.  Possible values for list-type are:
-`recents' `bookmarks' `projects' `agenda' `registers'."
+`recents' `bookmarks' `projects' `agenda' `registers' `modes'."
   :type  '(repeat (alist :key-type symbol :value-type integer))
   :group 'dashboard)
 
@@ -255,7 +261,8 @@ If nil it is disabled.  Possible values for list-type are:
     (bookmarks . "m")
     (projects  . "p")
     (agenda    . "a")
-    (registers . "e"))
+    (registers . "e")
+    (modes     . "x"))
   "Association list of items and their corresponding shortcuts.
 Will be of the form `(list-type . keys)' as understood by `(kbd keys)'.
 If nil, shortcuts are disabled.  If an entry's value is nil, that item's
@@ -283,11 +290,12 @@ Set to nil for unbounded."
     (bookmarks . "bookmark")
     (agenda    . "calendar")
     (projects  . "rocket")
-    (registers . "database"))
+    (registers . "database")
+    (modes     . "beaker"))
   "Association list for the icons of the heading sections.
 Will be of the form `(list-type . icon-name-string)`.
 If nil it is disabled.  Possible values for list-type are:
-`recents' `bookmarks' `projects' `agenda' `registers'"
+`recents' `bookmarks' `projects' `agenda' `registers' `modes'"
   :type  '(repeat (alist :key-type symbol :value-type string))
   :group 'dashboard)
 
@@ -455,6 +463,9 @@ If MESSAGEBUF is not nil then MSG is also written in message buffer."
              ((string-equal heading "Projects:")
               (all-the-icons-octicon (cdr (assoc 'projects dashboard-heading-icons))
                                      :height 1.2 :v-adjust 0.0 :face 'dashboard-heading))
+             ((string-equal heading "Modes:")
+              (all-the-icons-octicon (cdr (assoc 'modes dashboard-heading-icons))
+                                     :height 1.2 :v-adjust 0.0 :face 'dashboard-heading))
              (t " ")))
     (insert " "))
 
@@ -567,6 +578,10 @@ Argument IMAGE-PATH path to the image."
            (if (and (display-graphic-p) (image-type-available-p 'png))
                dashboard-banner-logo-png
              (dashboard-get-banner-path 1)))
+          ((eq 'phdemacs dashboard-startup-banner)
+           (if (and (display-graphic-p) (image-type-available-p 'png))
+               dashboard-banner-phdemacs-png
+             (dashboard-get-banner-path 3)))
           ((integerp dashboard-startup-banner)
            (dashboard-get-banner-path dashboard-startup-banner))
           ((stringp dashboard-startup-banner)
@@ -675,6 +690,8 @@ to widget creation."
                              (all-the-icons-octicon "primitive-dot" :height 1.0 :v-adjust 0.01))
                             ((file-remote-p path)
                              (all-the-icons-octicon "radio-tower" :height 1.0 :v-adjust 0.01))
+                            ((string-equal ,section-name "Modes:")
+                             (all-the-icons-octicon "ruby" :height 1.0 :v-adjust 0.0))
                             (t (all-the-icons-icon-for-file (file-name-nondirectory path)
                                                             :v-adjust -0.05))))))
               (setq tag (concat icon " " ,@rest))))
@@ -1260,6 +1277,45 @@ to compare."
    (dashboard-get-shortcut 'registers)
    (lambda (&rest _) (jump-to-register (car el)))
    (format "%c - %s" (car el) (register-describe-oneline (car el)))))
+
+;;
+;; Modes
+;;
+(defcustom dashboard-modes-alist nil
+  "The alist of title and commands to be executed."
+  :type '(alist :key-type (string :tag "Mode description name")
+                :value-type (function :tag "Mode command"))
+  :group 'dashboard)
+
+(defcustom dashboard-modes-status-alist nil
+  "The alist of title and mode status."
+  :type '(alist :key-type (string :tag "Mode description name")
+                :value-type (function :tag "Mode status"))
+  :group 'dashboard)
+
+(defun dashboard-insert-modes (list-size)
+  "Add the list of LIST-SIZE items of modes."
+  (dashboard-insert-section
+   "Modes:"
+   dashboard-modes-alist
+   list-size
+   'modes
+   (dashboard-get-shortcut 'modes)
+   (lambda (&rest _)
+     (let ((key (car el))
+           (cmd (cdr el)))
+       (cond
+        ((commandp cmd)
+         (command-execute cmd)
+         )
+        ;; add more cases here
+        )))
+   (let* ((key (car el))
+          ;;(mstatf (cdr (assoc key dashboard-modes-status-alist)))
+          ;;(mstat (if `mstatf "X" " "))
+          )
+     ;; (format "%s\t[%s]" key mstat)
+     (format "%s" key))))
 
 (provide 'dashboard-widgets)
 ;;; dashboard-widgets.el ends here
