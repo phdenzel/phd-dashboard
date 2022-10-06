@@ -36,6 +36,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 * Correct straight.el package count (#354)
 * Lazy load modules specify in dashboard buffer (#359)
 * Clean up zombie project for project.el (#363)
+* Add capability to navigate each section (#365)
+* Add functionality to delete items (#366)
+* Fix issue dashboard-banners-directory resolves with two slashes ("dashboard//banners") (GNU only?) (#367)
+* Add capability to remove item for agenda (#372)
+* Add CI, activation test (#381)
+* Fix dashboard not showing up in daemon mode (#382)
+* Calculate truncate path length in pixel (#402)
 
 ## 1.7.0
 > Released Feb 21, 2020

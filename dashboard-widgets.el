@@ -23,8 +23,8 @@
 ;;; Code:
 
 (require 'cl-lib)
-(require 'subr-x)
 (require 'image)
+(require 'subr-x)
 
 ;; Compiler pacifier
 (declare-function all-the-icons-icon-for-dir "ext:all-the-icons.el")
@@ -43,20 +43,23 @@
 (declare-function project-forget-zombie-projects "ext:project.el" nil t)
 (declare-function org-agenda-format-item "ext:org-agenda.el")
 (declare-function org-compile-prefix-format "ext:org-agenda.el")
+(declare-function org-entry-get "ext:org.el")
 (declare-function org-entry-is-done-p "ext:org.el")
-(declare-function org-in-archived-heading-p "ext:org.el")
+(declare-function org-entry-is-todo-p "ext:org.el")
 (declare-function org-get-category "ext:org.el")
 (declare-function org-get-deadline-time "ext:org.el")
 (declare-function org-get-heading "ext:org.el")
+(declare-function org-get-priority "ext:org.el")
 (declare-function org-get-scheduled-time "ext:org.el")
 (declare-function org-get-tags "ext:org.el")
-(declare-function org-map-entries "ext:org.el")
-(declare-function org-outline-level "ext:org.el")
-(declare-function org-today "ext:org.el")
 (declare-function org-get-todo-face "ext:org.el")
 (declare-function org-get-todo-state "ext:org.el")
-(declare-function org-entry-is-todo-p "ext:org.el")
+(declare-function org-in-archived-heading-p "ext:org.el")
+(declare-function org-map-entries "ext:org.el")
+(declare-function org-outline-level "ext:org.el")
 (declare-function org-release-buffers "ext:org.el")
+(declare-function org-time-string-to-time "ext:org.el")
+(declare-function org-today "ext:org.el")
 (declare-function recentf-cleanup "ext:recentf.el")
 (defalias 'org-time-less-p 'time-less-p)
 (defvar org-level-faces)
@@ -66,6 +69,8 @@
 (defvar org-todo-keywords-1)
 (defvar all-the-icons-dir-icon-alist)
 (defvar package-activated-list)
+(declare-function string-pixel-width "subr-x.el")   ; TODO: remove this after 29.1
+(declare-function shr-string-pixel-width "shr.el")  ; TODO: remove this after 29.1
 
 (defcustom dashboard-page-separator "\n\n"
   "Separator to use between the different pages."
@@ -136,15 +141,15 @@ preserved."
   :group 'dashboard)
 
 (defconst dashboard-banners-directory
-  (concat (file-name-directory (locate-library "dashboard")) "/banners/")
+  (concat (file-name-directory (locate-library "dashboard")) "banners/")
   "Default banner directory.")
 
 (defconst dashboard-banner-official-png
-  (expand-file-name (concat dashboard-banners-directory "emacs.png"))
+  (concat dashboard-banners-directory "emacs.png")
   "Emacs banner image.")
 
 (defconst dashboard-banner-logo-png
-  (expand-file-name (concat dashboard-banners-directory "logo.png"))
+  (concat dashboard-banners-directory "logo.png")
   "Emacs banner image.")
 
 (defconst dashboard-banner-phdemacs-png
@@ -164,7 +169,8 @@ preserved."
 The format is: 'icon title help action face prefix suffix'.
 
 Example:
-'((\"☆\" \"Star\" \"Show stars\" (lambda (&rest _) (show-stars)) 'warning \"[\" \"]\"))"
+'((\"☆\" \"Star\" \"Show stars\" (lambda (&rest _)
+                                    (show-stars)) 'warning \"[\" \"]\"))"
   :type '(repeat (repeat (list string string string function symbol string string)))
   :group 'dashboard)
 
@@ -175,6 +181,8 @@ Example:
         (setq package-count (length package-activated-list)))
       (when (boundp 'straight--profile-cache)
         (setq package-count (+ (hash-table-count straight--profile-cache) package-count)))
+      (when (fboundp 'elpaca--queued)
+        (setq package-count (length (elpaca--queued))))
       (if (zerop package-count)
           (format "Emacs started in %s" time)
         (format "%d packages loaded in %s" package-count time))))
@@ -381,13 +389,27 @@ If nil it is disabled.  Possible values for list-type are:
   "Call FNC with ARGS if exists."
   (when (fboundp fnc) (if args (funcall fnc args) (funcall fnc))))
 
+;; TODO: Use function `string-pixel-width' after 29.1
+(defun dashboard-string-pixel-width (str)
+  "Return the width of STR in pixels."
+  (if (fboundp #'string-pixel-width)
+      (string-pixel-width str)
+    (require 'shr)
+    (shr-string-pixel-width str)))
+
+(defun dashboard-str-len (str)
+  "Calculate STR in pixel width."
+  (let ((width (window-font-width))
+        (len (dashboard-string-pixel-width str)))
+    (+ (/ len width)
+       (if (zerop (% len width)) 0 1))))  ; add one if exceeed
+
 ;;
 ;; Generic widget helpers
 ;;
 (defun dashboard-subseq (seq end)
   "Return the subsequence of SEQ from 0 to END."
-  (let ((len (length seq)))
-    (butlast seq (- len (min len end)))))
+  (let ((len (length seq))) (butlast seq (- len (min len end)))))
 
 (defun dashboard-get-shortcut-name (item)
   "Get the shortcut name to be used for ITEM."
@@ -485,7 +507,7 @@ If MESSAGEBUF is not nil then MSG is also written in message buffer."
 (defun dashboard-center-line (string)
   "Center a STRING accoring to it's size."
   (insert (make-string (max 0 (floor (/ (- dashboard-banner-length
-                                           (+ (length string) 1)) 2))) ?\ )))
+                                           (+ (string-width string) 1)) 2))) ?\ )))
 
 ;;
 ;; BANNER
@@ -744,32 +766,39 @@ to widget creation."
 
 (defun dashboard-shorten-path-beginning (path)
   "Shorten PATH from beginning if exceeding maximum length."
-  (let* ((len-path (length path)) (len-rep (length dashboard-path-shorten-string))
+  (let* ((len-path (length path))
+         (slen-path (dashboard-str-len path))
+         (len-rep (dashboard-str-len dashboard-path-shorten-string))
          (len-total (- dashboard-path-max-length len-rep))
          front)
-    (if (<= len-path dashboard-path-max-length) path
-      (setq front (ignore-errors (substring path (- len-path len-total) len-path)))
+    (if (<= slen-path dashboard-path-max-length) path
+      (setq front (ignore-errors (substring path (- slen-path len-total) len-path)))
       (if front (concat dashboard-path-shorten-string front) ""))))
 
 (defun dashboard-shorten-path-middle (path)
   "Shorten PATH from middle if exceeding maximum length."
-  (let* ((len-path (length path)) (len-rep (length dashboard-path-shorten-string))
+  (let* ((len-path (length path))
+         (slen-path (dashboard-str-len path))
+         (len-rep (dashboard-str-len dashboard-path-shorten-string))
          (len-total (- dashboard-path-max-length len-rep))
          (center (/ len-total 2))
          (end-back center)
-         (start-front (- len-path center))
+         (start-front (- slen-path center))
          back front)
-    (if (<= len-path dashboard-path-max-length) path
+    (if (<= slen-path dashboard-path-max-length) path
       (setq back (substring path 0 end-back)
             front (ignore-errors (substring path start-front len-path)))
       (if front (concat back dashboard-path-shorten-string front) ""))))
 
 (defun dashboard-shorten-path-end (path)
   "Shorten PATH from end if exceeding maximum length."
-  (let* ((len-path (length path)) (len-rep (length dashboard-path-shorten-string))
-         (len-total (- dashboard-path-max-length len-rep))
+  (let* ((len-path (length path))
+         (slen-path (dashboard-str-len path))
+         (len-rep (dashboard-str-len dashboard-path-shorten-string))
+         (diff (- slen-path len-path))
+         (len-total (- dashboard-path-max-length len-rep diff))
          back)
-    (if (<= len-path dashboard-path-max-length) path
+    (if (<= slen-path dashboard-path-max-length) path
       (setq back (ignore-errors (substring path 0 len-total)))
       (if (and back (< 0 dashboard-path-max-length))
           (concat back dashboard-path-shorten-string) ""))))
@@ -845,21 +874,21 @@ to widget creation."
        (setq len-list (length recentf-list))
        (while (and (< count len-item) (< count len-list))
          (setq base (nth count recentf-list)
-               align-length (max align-length (length (dashboard-f-filename base))))
+               align-length (max align-length (dashboard-str-len (dashboard-f-filename base))))
          (cl-incf count)))
       (`bookmarks
        (let ((bookmarks-lst (bookmark-all-names)))
          (setq len-list (length bookmarks-lst))
          (while (and (< count len-item) (< count len-list))
            (setq base (nth count bookmarks-lst)
-                 align-length (max align-length (length base)))
+                 align-length (max align-length (dashboard-str-len base)))
            (cl-incf count))))
       (`projects
        (let ((projects-lst (dashboard-projects-backend-load-projects)))
          (setq len-list (length projects-lst))
          (while (and (< count len-item) (< count len-list))
            (setq base (nth count projects-lst)
-                 align-length (max align-length (length (dashboard-f-base base))))
+                 align-length (max align-length (dashboard-str-len (dashboard-f-base base))))
            (cl-incf count))))
       (t (error "Unknown type for align length: %s" type)))
     align-length))
@@ -889,8 +918,7 @@ to widget creation."
 (defun dashboard-insert-recents (list-size)
   "Add the list of LIST-SIZE items from recently edited files."
   (setq dashboard--recentf-cache-item-format nil)
-  (recentf-mode)
-  (dashboard-mute-apply (recentf-cleanup))
+  (dashboard-mute-apply (recentf-mode 1) (recentf-cleanup))
   (dashboard-insert-section
    "Recent Files:"
    (dashboard-shorten-paths recentf-list 'dashboard-recentf-alist 'recents)
@@ -1084,7 +1112,8 @@ It is the MATCH attribute for `org-map-entries'"
 
 (defcustom dashboard-agenda-sort-strategy nil
   "A list of strategies to sort the agenda.  If nil agenda is not sorted."
-  :type '(repeat (choice (const time-up) (const time-down)
+  :type '(repeat (choice (const priority-up) (const priority-down)
+                         (const time-up) (const time-down)
                          (const todo-state-up) (const todo-state-down)))
   :group 'dashboard)
 
@@ -1093,29 +1122,39 @@ It is the MATCH attribute for `org-map-entries'"
 When the dashboard-agenda is created this format is inserted into
 `org-agenda-prefix-format' as `dashboard-agenda' and compiled with
 `org-compile-prefix-format' previous calling `dashboard-agenda-entry-format' for
- each agenda entry."
+each agenda entry."
   :type 'string
   :group 'dashboard)
 
 (defun dashboard-agenda-entry-format ()
-  "Format agenda entry to show it on dashboard."
+  "Format agenda entry to show it on dashboard.
+Also,it set text properties that latter are used to sort entries and perform different actions."
   (let* ((scheduled-time (org-get-scheduled-time (point)))
          (deadline-time (org-get-deadline-time (point)))
-         (entry-time (or scheduled-time deadline-time))
+         (entry-timestamp (dashboard-agenda--entry-timestamp (point)))
+         (entry-time (or scheduled-time deadline-time entry-timestamp))
          (item (org-agenda-format-item
                 (dashboard-agenda--formatted-time)
                 (dashboard-agenda--formatted-headline)
                 (org-outline-level)
                 (org-get-category)
                 (org-get-tags)))
-         (loc (point))
-         (file (buffer-file-name))
          (todo-state (org-get-todo-state))
+         (item-priority (org-get-priority (org-get-heading t t t t)))
          (todo-index (and todo-state
                           (length (member todo-state org-todo-keywords-1))))
-         (entry-data (list (cons 'time entry-time)
-                           (cons 'todo-index todo-index))))
-    (list item loc file entry-data)))
+         (entry-data (list 'dashboard-agenda-file (buffer-file-name)
+                           'dashboard-agenda-loc (point)
+                           'dashboard-agenda-priority item-priority
+                           'dashboard-agenda-todo-index todo-index
+                           'dashboard-agenda-time entry-time)))
+    (add-text-properties 0 (length item) entry-data item)
+    item))
+
+(defun dashboard-agenda--entry-timestamp (point)
+  "Get the timestamp from an entry at POINT."
+  (when-let ((timestamp (org-entry-get point "TIMESTAMP")))
+    (org-time-string-to-time timestamp)))
 
 (defun dashboard-agenda--formatted-headline ()
   "Set agenda faces to `HEADLINE' when face text property is nil."
@@ -1131,7 +1170,8 @@ When the dashboard-agenda is created this format is inserted into
 
 (defun dashboard-agenda--formatted-time ()
   "Get the scheduled or dead time of an entry.  If no time is found return nil."
-  (when-let ((time (or (org-get-scheduled-time (point)) (org-get-deadline-time (point)))))
+  (when-let ((time (or (org-get-scheduled-time (point)) (org-get-deadline-time (point))
+                       (dashboard-agenda--entry-timestamp (point)))))
     (format-time-string dashboard-agenda-time-string-format time)))
 
 (defun dashboard-due-date-for-agenda ()
@@ -1146,13 +1186,16 @@ An entry is included if this function returns nil and excluded if returns a
 point."
   (let ((scheduled-time (org-get-scheduled-time (point)))
         (deadline-time (org-get-deadline-time (point)))
+        (entry-timestamp (dashboard-agenda--entry-timestamp (point)))
         (due-date (dashboard-due-date-for-agenda)))
     (unless (and (not (org-entry-is-done-p))
                  (not (org-in-archived-heading-p))
                  (or (and scheduled-time
                           (org-time-less-p scheduled-time due-date))
                      (and deadline-time
-                          (org-time-less-p deadline-time due-date))))
+                          (org-time-less-p deadline-time due-date))
+                     (and entry-timestamp
+                          (org-time-less-p entry-timestamp due-date))))
       (point))))
 
 (defun dashboard-filter-agenda-by-todo ()
@@ -1220,6 +1263,8 @@ found for the strategy it uses nil predicate."
 (defun dashboard-agenda--build-sort-function-predicate (strategy)
   "Return the predicate to compare two entryes depending on the `STRATEGY'."
   (cl-case strategy
+    (`priority-up '>)
+    (`priority-down '<)
     (`time-up 'org-time-less-p)
     (`time-down (lambda (a b) (org-time-less-p b a)))
     (`todo-state-up '>)
@@ -1228,16 +1273,17 @@ found for the strategy it uses nil predicate."
 (defun dashboard-agenda--build-sort-function-attribute (strategy)
   "Return the argument to compare two entries depending to the `STRATEGY'."
   (cond
-   ((memq strategy '(time-up time-down)) 'time)
-   ((memq strategy '(todo-state-up todo-state-down)) 'todo-index)
+   ((memq strategy '(priority-up priority-down)) 'dashboard-agenda-priority)
+   ((memq strategy '(time-up time-down)) 'dashboard-agenda-time)
+   ((memq strategy '(todo-state-up todo-state-down)) 'dashboard-agenda-todo-index)
    (t nil)))
 
 (defun dashboard-agenda--compare-entries (entry1 entry2 strategies predicate attribute)
   "Compare `ENTRY1' and `ENTRY2' by `ATTRIBUTE' using `PREDICATE'.
 If both attributes are nil or equals the next strategy in `STRATEGIES' is used
 to compare."
-  (let ((arg1 (alist-get attribute (nth 3 entry1)))
-        (arg2 (alist-get attribute (nth 3 entry2))))
+  (let ((arg1 (get-text-property 0 attribute entry1))
+        (arg2 (get-text-property 0 attribute entry2)))
     (cond
      ((or (and (null arg1) (null arg2)) (equal arg1 arg2))
       (apply (dashboard-agenda--build-sort-function strategies) (list entry1 entry2)))
@@ -1257,11 +1303,11 @@ to compare."
    'agenda
    (dashboard-get-shortcut 'agenda)
    `(lambda (&rest _)
-      (let ((buffer (find-file-other-window (nth 2 ',el))))
+      (let ((buffer (find-file-other-window (get-text-property 0 'dashboard-agenda-file ,el))))
         (with-current-buffer buffer
-          (goto-char (nth 1 ',el))
+          (goto-char (get-text-property 0 'dashboard-agenda-loc ,el))
           (switch-to-buffer buffer))))
-   (format "%s" (nth 0 el))))
+   (format "%s" el)))
 
 ;;
 ;; Registers

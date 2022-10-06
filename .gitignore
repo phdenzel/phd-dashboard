@@ -1,7 +1,15 @@
-# Compiled
+# ignore these directories
+/.git/
+/recipes/
+/_test/
+
+# ignore generated files
 *.elc
-*.el~
-emacs-dashboard-autoloads.el
-# Packaging
-.cask
-/build
+
+# eask packages
+.eask/
+dist/
+
+# packaging
+*-autoloads.el
+*-pkg.el
