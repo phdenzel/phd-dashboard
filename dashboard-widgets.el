@@ -551,7 +551,7 @@ If MESSAGEBUF is not nil then MSG is also written in message buffer."
      (append (when (image-type-available-p 'png)
                (list :image dashboard-banner-logo-png))
              (list :text (dashboard-get-banner-path 1))))
-    ('phd-emacs
+    ('phdemacs
      (append (when (image-type-available-p 'png)
                (list :image dashboard-banner-phdemacs-png))
              (list :text (dashboard-get-banner-path 3))))
