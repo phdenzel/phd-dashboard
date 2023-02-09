@@ -1,6 +1,6 @@
 ;;; dashboard.el --- A startup screen extracted from Spacemacs  -*- lexical-binding: t -*-
 
-;; Copyright (c) 2016-2022 emacs-dashboard maintainers
+;; Copyright (c) 2016-2023 emacs-dashboard maintainers
 ;;
 ;; Author     : Rakan Al-Hneiti <rakan.alhneiti@gmail.com>
 ;; Maintainer : Jesús Martínez <jesusmartinez93@gmail.com>
@@ -249,11 +249,11 @@ Optional prefix ARG says how many lines to move; default is one line."
 (defun dashboard--section-list (section)
   "Return the list from SECTION."
   (cl-case section
-    (`recents recentf-list)
-    (`bookmarks (bookmark-all-names))
-    (`projects (dashboard-projects-backend-load-projects))
+    (`recents        recentf-list)
+    (`bookmarks      (bookmark-all-names))
+    (`projects       (dashboard-projects-backend-load-projects))
     (`ls-directories (dashboard-ls--dirs))
-    (`ls-files (dashboard-ls--files))
+    (`ls-files       (dashboard-ls--files))
     (t (user-error "Unknown section for search: %s" section))))
 
 (defun dashboard--current-item-in-path ()
@@ -367,6 +367,13 @@ Optional argument ARGS adviced function arguments."
 ;;
 ;; Insertion
 ;;
+(defmacro dashboard--with-buffer (&rest body)
+  "Execute BODY in dashboard buffer."
+  (declare (indent 0))
+  `(with-current-buffer (get-buffer-create dashboard-buffer-name)
+     (let (buffer-read-only) ,@body)
+     (current-buffer)))
+
 (defun dashboard-maximum-section-length ()
   "For the just-inserted section, calculate the length of the longest line."
   (let ((max-line-length 0))
@@ -382,71 +389,62 @@ Optional argument ARGS adviced function arguments."
 (defun dashboard-insert-startupify-lists ()
   "Insert the list of widgets into the buffer."
   (interactive)
-  (let ((recentf-is-on (recentf-enabled-p))
+  (let ((inhibit-redisplay t)
+        (recentf-is-on (recentf-enabled-p))
         (origial-recentf-list recentf-list)
         (dashboard-num-recents (or (cdr (assoc 'recents dashboard-items)) 0))
         (max-line-length 0))
     (when recentf-is-on
       (setq recentf-list (dashboard-subseq recentf-list dashboard-num-recents)))
-    (when (or dashboard-force-refresh
-              (not (eq dashboard-buffer-last-width (window-width))))
-      (setq dashboard-banner-length (window-width)
-            dashboard-buffer-last-width dashboard-banner-length)
-      (with-current-buffer (get-buffer-create dashboard-buffer-name)
-        (let (buffer-read-only)
-          (erase-buffer)
-          (dashboard-insert-banner)
-          (dashboard-insert-page-break)
-          (setq dashboard--section-starts nil)
-          (mapc (lambda (els)
-                  (let* ((el (or (car-safe els) els))
-                         (list-size
-                          (or (cdr-safe els)
-                              dashboard-items-default-length))
-                         (item-generator
-                          (cdr-safe (assoc el dashboard-item-generators))))
-                    (add-to-list 'dashboard--section-starts (point))
-                    (funcall item-generator list-size)
-                    (when recentf-is-on
-                      (setq recentf-list origial-recentf-list))
-                    (setq max-line-length
-                          (max max-line-length (dashboard-maximum-section-length)))
-                    (dashboard-insert-page-break)))
-                dashboard-items)
-          (when dashboard-center-content
-            (when dashboard--section-starts
-              (goto-char (car (last dashboard--section-starts))))
-            (let ((margin (floor (/ (max (- (window-width) max-line-length) 0) 2))))
-              (while (not (eobp))
-                (unless (string-suffix-p (thing-at-point 'line) dashboard-page-separator)
-                  (insert (make-string margin ?\ )))
-                (forward-line 1))))
-          (dashboard-insert-footer))
+    (dashboard--with-buffer
+      (when (or dashboard-force-refresh (not (eq major-mode 'dashboard-mode)))
+        (erase-buffer)
+        (dashboard-insert-banner)
+        (insert "\n")
+        (setq dashboard--section-starts nil)
+        (mapc (lambda (els)
+                (let* ((el (or (car-safe els) els))
+                       (list-size
+                        (or (cdr-safe els)
+                            dashboard-items-default-length))
+                       (item-generator
+                        (cdr-safe (assoc el dashboard-item-generators))))
+                  (push (point) dashboard--section-starts)
+                  (funcall item-generator list-size)
+                  (goto-char (point-max))
+                  ;; add a newline so the next section-name doesn't get include
+                  ;; on the same line.
+                  (insert "\n")
+                  (when recentf-is-on
+                    (setq recentf-list origial-recentf-list))
+                  (setq max-line-length
+                        (max max-line-length (dashboard-maximum-section-length)))))
+              dashboard-items)
+        (when dashboard-center-content
+          (dashboard-center-text
+           (if dashboard--section-starts
+               (car (last dashboard--section-starts))
+             (point))
+           (point-max)))
+        (save-excursion
+          (dolist (start dashboard--section-starts)
+            (goto-char start)
+            (delete-char -1)  ; delete the newline we added previously
+            (insert dashboard-page-separator)))
+        (progn
+          (delete-char -1)
+          (insert dashboard-page-separator))
+        (dashboard-insert-footer)
         (goto-char (point-min))
         (dashboard-mode)))
     (when recentf-is-on
       (setq recentf-list origial-recentf-list))))
-
-(add-hook 'window-setup-hook
-          (lambda ()
-            ;; 100 means `dashboard-resize-on-hook' will run last
-            (add-hook 'window-size-change-functions 'dashboard-resize-on-hook 100)
-            (dashboard-resize-on-hook)))
 
 (defun dashboard-refresh-buffer (&rest _)
   "Refresh buffer."
   (interactive)
   (let ((dashboard-force-refresh t)) (dashboard-insert-startupify-lists))
   (switch-to-buffer dashboard-buffer-name))
-
-(defun dashboard-resize-on-hook (&optional _)
-  "Re-render dashboard on window size change."
-  (let ((space-win (get-buffer-window dashboard-buffer-name))
-        (frame-win (frame-selected-window)))
-    (when (and space-win
-               (not (window-minibuffer-p frame-win)))
-      (with-selected-window space-win
-        (dashboard-insert-startupify-lists)))))
 
 ;;;###autoload
 (defun dashboard-setup-startup-hook ()

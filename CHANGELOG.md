@@ -43,6 +43,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 * Add CI, activation test (#381)
 * Fix dashboard not showing up in daemon mode (#382)
 * Calculate truncate path length in pixel (#402)
+* Center banner with properties and combine text with image (#407)
+* Caculate line length in pixel width (#427)
 
 ## 1.7.0
 > Released Feb 21, 2020
